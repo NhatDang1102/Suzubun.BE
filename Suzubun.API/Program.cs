@@ -12,19 +12,17 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. CORS Configuration - Cực kỳ quan trọng cho Somee/Netlify
+// 1. Cấu hình CORS cực kỳ thoải mái để tránh lỗi Preflight trên IIS/Somee
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowFrontend", policy =>
+    options.AddPolicy("AllowAll", policy =>
     {
-        policy.SetIsOriginAllowed(origin => true) // Cho phép tất cả origin để debug, sẽ siết lại sau
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod();
-              // Lưu ý: Bỏ AllowCredentials() khi dùng SetIsOriginAllowed hoặc AllowAnyOrigin
     });
 });
 
-// Load secrets
 builder.Configuration.AddJsonFile("appsettings.Secret.json", optional: true, reloadOnChange: true);
 
 builder.Services.AddControllers();
@@ -43,16 +41,7 @@ builder.Services.AddSwaggerGen(c =>
         Type = SecuritySchemeType.Http,
         Scheme = "bearer"
     });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
-            new string[] {}
-        }
-    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement { { new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }, new string[] {} } });
 });
 
 builder.Services.Configure<AppOptions>(builder.Configuration);
@@ -60,23 +49,15 @@ builder.Services.Configure<SupabaseConfig>(builder.Configuration.GetSection("Con
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
-var supabaseUrl = builder.Configuration["ConnectionStrings:SupabaseUrl"] ?? throw new InvalidOperationException("SupabaseUrl missing");
-var supabaseKey = builder.Configuration["ConnectionStrings:SupabaseKey"] ?? throw new InvalidOperationException("SupabaseKey missing");
+var supabaseUrl = builder.Configuration["ConnectionStrings:SupabaseUrl"] ?? "";
+var supabaseKey = builder.Configuration["ConnectionStrings:SupabaseKey"] ?? "";
 var supabaseAnonKey = builder.Configuration["ConnectionStrings:SupabaseAnonKey"];
 
 builder.Services.AddScoped<Supabase.Client>(provider => 
-{
-    return new Supabase.Client(supabaseUrl, supabaseAnonKey, new Supabase.SupabaseOptions
-    {
-        AutoRefreshToken = true,
-        AutoConnectRealtime = true
-    });
-});
+    new Supabase.Client(supabaseUrl, supabaseAnonKey, new Supabase.SupabaseOptions { AutoRefreshToken = true, AutoConnectRealtime = true }));
 
 builder.Services.AddKeyedSingleton<Supabase.Client>("AdminClient", (provider, key) => 
-{
-    return new Supabase.Client(supabaseUrl, supabaseKey, new Supabase.SupabaseOptions { AutoRefreshToken = true });
-});
+    new Supabase.Client(supabaseUrl, supabaseKey, new Supabase.SupabaseOptions { AutoRefreshToken = true }));
 
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IEmailService, EmailService>();
@@ -91,6 +72,8 @@ builder.Services.AddScoped<IFlashcardService, FlashcardService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Nếu Somee chặn outbound, Authority sẽ fail. 
+        // Trong trường hợp đó, bạn nên dùng TokenValidationParameters với Key cứng (Symmetric)
         options.Authority = $"{supabaseUrl}/auth/v1";
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -104,17 +87,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 var app = builder.Build();
 
-// THỨ TỰ MIDDLEWARE CỰC KỲ QUAN TRỌNG
+// Thêm Endpoint Ping để test
+app.MapGet("/api/ping", () => Results.Ok(new { message = "API Suzubun is alive!", time = DateTime.Now }));
+
 app.UseSwagger();
 app.UseSwaggerUI(c => {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Suzubun API v1");
     c.RoutePrefix = "swagger";
 });
 
-app.UseHttpsRedirection();
+// Thứ tự Middleware
+app.UseCors("AllowAll");
 
-// CORS phải đứng trước Authentication/Authorization
-app.UseCors("AllowFrontend");
+app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
