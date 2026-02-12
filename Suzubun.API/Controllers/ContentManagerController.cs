@@ -15,12 +15,14 @@ public class ContentManagerController : ControllerBase
 {
     private readonly IStorageService _storageService;
     private readonly IContentService _contentService;
+    private readonly IJapaneseService _japaneseService;
     private readonly Supabase.Client _adminSupabase;
 
-    public ContentManagerController(IStorageService storageService, IContentService contentService, [FromKeyedServices("AdminClient")] Supabase.Client adminSupabase)
+    public ContentManagerController(IStorageService storageService, IContentService contentService, IJapaneseService japaneseService, [FromKeyedServices("AdminClient")] Supabase.Client adminSupabase)
     {
         _storageService = storageService;
         _contentService = contentService;
+        _japaneseService = japaneseService;
         _adminSupabase = adminSupabase;
     }
 
@@ -56,6 +58,20 @@ public class ContentManagerController : ControllerBase
         if (request.Audio != null)
         {
             audioUrl = await _storageService.UploadFileAsync(request.Audio.OpenReadStream(), request.Audio.FileName, "contents/audio");
+        }
+        else if (!string.IsNullOrEmpty(request.Body))
+        {
+            // TỰ ĐỘNG SINH GIỌNG ĐỌC NẾU KHÔNG CÓ FILE AUDIO
+            try 
+            {
+                var audioStream = await _japaneseService.GenerateSpeechAsync(request.Body);
+                audioUrl = await _storageService.UploadFileAsync(audioStream, "tts_voice.mp3", "contents/audio");
+            }
+            catch (Exception ex)
+            {
+                // Nếu lỗi TTS thì cứ bỏ qua để bài báo vẫn đăng được
+                Console.WriteLine("TTS Error: " + ex.Message);
+            }
         }
 
         var content = new Content

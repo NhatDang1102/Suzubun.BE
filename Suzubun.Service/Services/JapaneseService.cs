@@ -9,6 +9,7 @@ public interface IJapaneseService
 {
     Task<string> TranslateSentenceAsync(string sentence);
     Task<DictionaryResponse> GetWordDefinitionAsync(string word, string contextSentence);
+    Task<Stream> GenerateSpeechAsync(string text);
 }
 
 public class DictionaryResponse
@@ -27,6 +28,25 @@ public class JapaneseService : IJapaneseService
     {
         _openAiKey = options.Value.OpenAI.ApiKey;
         _httpClient = httpClientFactory.CreateClient();
+    }
+
+    public async Task<Stream> GenerateSpeechAsync(string text)
+    {
+        var requestBody = new
+        {
+            model = "tts-1",
+            input = text,
+            voice = "alloy" // Giọng alloy rất phù hợp cho tin tức
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech");
+        request.Headers.Add("Authorization", $"Bearer {_openAiKey}");
+        request.Content = JsonContent.Create(requestBody);
+
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content.ReadAsStreamAsync();
     }
 
     public async Task<string> TranslateSentenceAsync(string sentence)
