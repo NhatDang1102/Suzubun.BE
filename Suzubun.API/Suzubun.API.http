@@ -1,0 +1,6 @@
+@Suzubun.API_HostAddress = http://localhost:5043
+
+GET {{Suzubun.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
