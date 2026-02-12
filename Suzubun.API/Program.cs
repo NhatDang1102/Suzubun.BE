@@ -12,28 +12,26 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CORS Configuration
+// 1. CORS Configuration - Cực kỳ quan trọng cho Somee/Netlify
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("https://suzubun.netlify.app", "http://localhost:3000", "http://localhost:5173")
+        policy.SetIsOriginAllowed(origin => true) // Cho phép tất cả origin để debug, sẽ siết lại sau
               .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowAnyMethod();
+              // Lưu ý: Bỏ AllowCredentials() khi dùng SetIsOriginAllowed hoặc AllowAnyOrigin
     });
 });
 
 // Load secrets
 builder.Configuration.AddJsonFile("appsettings.Secret.json", optional: true, reloadOnChange: true);
 
-// Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
-
 builder.Services.AddEndpointsApiExplorer();
-// ... (Swagger config remains same)
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Suzubun API", Version = "v1" });
@@ -50,29 +48,22 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
             },
             new string[] {}
         }
     });
 });
 
-// Bind Configuration
 builder.Services.Configure<AppOptions>(builder.Configuration);
 builder.Services.Configure<SupabaseConfig>(builder.Configuration.GetSection("ConnectionStrings"));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
-// Supabase Configuration
-var supabaseUrl = builder.Configuration["ConnectionStrings:SupabaseUrl"] ?? throw new InvalidOperationException("SupabaseUrl is missing.");
-var supabaseKey = builder.Configuration["ConnectionStrings:SupabaseKey"] ?? throw new InvalidOperationException("SupabaseKey is missing.");
+var supabaseUrl = builder.Configuration["ConnectionStrings:SupabaseUrl"] ?? throw new InvalidOperationException("SupabaseUrl missing");
+var supabaseKey = builder.Configuration["ConnectionStrings:SupabaseKey"] ?? throw new InvalidOperationException("SupabaseKey missing");
 var supabaseAnonKey = builder.Configuration["ConnectionStrings:SupabaseAnonKey"];
 
-// Client for User-facing operations (respects RLS)
 builder.Services.AddScoped<Supabase.Client>(provider => 
 {
     return new Supabase.Client(supabaseUrl, supabaseAnonKey, new Supabase.SupabaseOptions
@@ -82,16 +73,11 @@ builder.Services.AddScoped<Supabase.Client>(provider =>
     });
 });
 
-// Administrative Client (bypasses RLS for system tasks)
 builder.Services.AddKeyedSingleton<Supabase.Client>("AdminClient", (provider, key) => 
 {
-    return new Supabase.Client(supabaseUrl, supabaseKey, new Supabase.SupabaseOptions
-    {
-        AutoRefreshToken = true
-    });
+    return new Supabase.Client(supabaseUrl, supabaseKey, new Supabase.SupabaseOptions { AutoRefreshToken = true });
 });
 
-// Register Services
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -102,7 +88,6 @@ builder.Services.AddScoped<IDictionaryService, DictionaryService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IFlashcardService, FlashcardService>();
 
-// JWT Authentication Configuration - Using Authority for automatic JWK discovery
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -110,25 +95,25 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuers = new[] { $"{supabaseUrl}/auth/v1", "supabase" }, // Chấp nhận cả URL và định danh "supabase"
+            ValidIssuers = new[] { $"{supabaseUrl}/auth/v1", "supabase" },
             ValidateAudience = true,
-            ValidAudience = "authenticated", // Audience mặc định cho user đã đăng nhập
+            ValidAudience = "authenticated",
             ValidateLifetime = true
         };
     });
 
 var app = builder.Build();
 
-// Enable Swagger in all environments (including Production/Somee)
+// THỨ TỰ MIDDLEWARE CỰC KỲ QUAN TRỌNG
 app.UseSwagger();
-app.UseSwaggerUI(c =>
-{
+app.UseSwaggerUI(c => {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Suzubun API v1");
-    c.RoutePrefix = "swagger"; // Giữ nguyên /swagger/index.html
+    c.RoutePrefix = "swagger";
 });
 
 app.UseHttpsRedirection();
 
+// CORS phải đứng trước Authentication/Authorization
 app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
